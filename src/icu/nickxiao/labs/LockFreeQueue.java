@@ -6,6 +6,8 @@ package icu.nickxiao.labs;
  * @since 1.0.0
  */
 
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.IntStream;
@@ -37,16 +39,15 @@ public class LockFreeQueue {
      * @return
      */
     public boolean add(Integer element) {
-        int index = (tail.get() + 1) % atomicReferenceArray.length();
-        if (index == head.get() % atomicReferenceArray.length()) {
-            // System.out.println("当前队列已满,"+ element+"无法入队!");
-            return false;
-        }
-        while (!atomicReferenceArray.compareAndSet(index, EMPTY, element)) {
-            return add(element);
-        }
+        int index = 0;
+        do {
+            index = (tail.get() + 1) % atomicReferenceArray.length();
+            if (index == head.get() % atomicReferenceArray.length()) {
+                return false;
+            }
+        }while (!atomicReferenceArray.compareAndSet(index, EMPTY, element));
+
         tail.incrementAndGet(); //移动尾指针
-        // System.out.println("入队成功!" + element);
         return true;
     }
 
@@ -60,14 +61,12 @@ public class LockFreeQueue {
             // System.out.println("当前队列为空");
             return null;
         }
-        int index = (head.get() + 1) % atomicReferenceArray.length();
-        Integer ele = (Integer) atomicReferenceArray.get(index);
-        if (ele == null) { //有可能其它线程也在出队
-            return poll();
-        }
-        while (!atomicReferenceArray.compareAndSet(index, ele, EMPTY)) {
-            return poll();
-        }
+        int index = 0;
+        Integer ele = null;
+        do {
+            index = (head.get() + 1) % atomicReferenceArray.length();
+            ele = (Integer) atomicReferenceArray.get(index);
+        }while (!atomicReferenceArray.compareAndSet(index, ele, EMPTY));
         head.incrementAndGet();
         // System.out.println("出队成功!" + ele);
         return ele;
@@ -88,18 +87,35 @@ public class LockFreeQueue {
     }
 
 
-    public static void main(String[] args) {
-        LockFreeQueue queue = new LockFreeQueue(1000000);
+    public static void main(String[] args) throws InterruptedException {
+        LockFreeQueue queue = new LockFreeQueue(10000000);
+        List<Thread> list = new LinkedList<>();
         long a = System.currentTimeMillis();
-        IntStream.rangeClosed(1, 10000).parallel().forEach(
-                i -> {
-                    if (i % 2 == 0) {
-                        queue.add(i);
-                    } else {
-                        queue.poll();
+        Thread t1=new Thread(()->{
+            for (int i = 0; i < 100; i++) {
+                queue.add(i);
+                queue.print();
+            }
+        });
+        list.add(t1);
+        for (int i = 0; i < 10; i++) {
+            Thread t = new Thread(()->{
+                for (int j = 0; j < 10; j++) {
+                    while (queue.poll()==null){
+
                     }
+                    queue.print();
                 }
-        );
+            });
+            list.add(t);
+        }
+
+        for (int i = 0; i < list.size(); i++) {
+            list.get(i).start();
+        }
+        for (int i = 0; i < list.size(); i++) {
+            list.get(i).join();
+        }
         long a1 = System.currentTimeMillis();
         System.out.println(a1 - a);
     }
